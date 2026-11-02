@@ -39,7 +39,8 @@ while time.time() - t0 < 15:
           f"fall_score={info.get('fall_score', 0):4.1f} "
           f"angle={info.get('torso_angle', -1):5.1f} "
           f"body_ratio={info.get('body_ratio', info.get('aspect_bbox', -1)):4.2f} "
-          f"hdist={info.get('hdist', -1):5.2f} hip_drop={info.get('hip_drop', 0):6.1f} "
+          f"hdist={info.get('hdist', -1):5.2f} ankle_dy={info.get('ankle_dy', -1):4.2f} "
+          f"sitting={int(info.get('ankle_dy', -1) > 0.7)} hip_drop={info.get('hip_drop', 0):6.1f} "
           f"bbox_wh=({bbox[2]-bbox[0]:.0f}x{bbox[3]-bbox[1]:.0f})")
 det.release()
 cap.release()
