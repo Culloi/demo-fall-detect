@@ -5,7 +5,7 @@
 判定方式参考 Quectel 官方 demo-fall-alarm-device 的二次验证 (打分制):
   前提: 可见(可信)骨骼节点比例 >= kpt_visible_ratio, 否则不判定
   - 躯干倾角: >=阈值 +2 / >=0.6*阈值(半躺) +1
-  - 腿部水平 (膝/踝接近髋部高度, 躺姿标志)   +1.5
+  - 腿部水平 (踝接近髋部高度, 躺姿标志; 不用膝防坐姿大腿水平误命中) +1.5
   - 半躺组合: 躯干半倾(0.6~1倍阈值)+腿部水平 +0.5
   - 身体长宽比横向 (关键点头顶/脚踝/肩宽)    +2
   - 多数关键点贴近画面底部                   +1.5
@@ -102,15 +102,20 @@ class FallDetector:
         elif angle >= self.angle_thr * 0.6:
             score += 1.0
 
-        # 1b) 腿部水平: 膝/踝接近髋部高度 -> 躺/半躺 (坐姿腿部朝下不命中)
+        # 1b) 腿部水平: 踝部接近髋部高度 -> 躺/半躺
+        #     只能用踝判定: 躺平踝与髋同高; 坐姿脚在地面踝远低于髋.
+        #     膝盖不能用 —— 坐椅子大腿水平, 膝盖y≈髋y 会误命中成"腿部水平",
+        #     配合前倾33°+ 恰好凑满3分造成坐姿弯腰误报 (2026-11-02 板上实测)
         #     半躺组合: 躯干半倾 + 腿部水平 额外 +0.5 (斜倚撑地典型形态)
         legs_h = False
+        ankle_dy = None
         if hip is not None and torso_len > 1e-3:
-            leg_pts = [k[i] for i in (13, 14, L_ANKLE, R_ANKLE) if vis_ok[i]]
-            if leg_pts:
-                dmin = min(abs(float(p[1]) - float(hip[1])) for p in leg_pts)
-                legs_h = dmin <= torso_len * 0.45
-                info["leg_dy"] = round(dmin / torso_len, 2)
+            ankle_pts = [k[i] for i in (L_ANKLE, R_ANKLE) if vis_ok[i]]
+            if ankle_pts:
+                ankle_dy = min(abs(float(p[1]) - float(hip[1]))
+                               for p in ankle_pts)
+                legs_h = ankle_dy <= torso_len * 0.45
+                info["ankle_dy"] = round(ankle_dy / torso_len, 2)
         if legs_h:
             score += 1.5
             if self.angle_thr * 0.6 <= angle < self.angle_thr:
@@ -167,7 +172,11 @@ class FallDetector:
         info["fall_score"] = round(score, 1)
         # 硬门槛: 倒地姿态必须至少躯干半倾 (>=0.6*阈值). 坐姿躯干直立,
         # 即使腿部水平+bbox比例+贴底凑够分数也不算倒地 (防坐椅误报)
-        posture = score >= 3.0 and angle >= self.angle_thr * 0.6
+        # 硬否决: 踝远低于髋 (垂直距离 > 0.7*躯干长 = 脚着地) 视为坐/站,
+        # 坐姿前倾弯腰等即使贴底+横向分布凑够分也不判倒地
+        sitting = ankle_dy is not None and ankle_dy > torso_len * 0.7
+        posture = (score >= 3.0 and angle >= self.angle_thr * 0.6
+                   and not sitting)
 
         # 5) 髋部快速下坠: 需同时倾角超标, 防止"坐下"动作误报; 历史按人隔离
         vel_ok = False
