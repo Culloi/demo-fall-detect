@@ -23,7 +23,7 @@ from alarm import AlarmController
 from audio_monitor import AudioMonitor
 from event_recorder import EventRecorder
 from fall_detector import FallDetector
-from ui import AppState, make_ui
+from ui import AppState, make_ui, tr
 from ui import annotate_frame
 
 
@@ -72,7 +72,7 @@ class App:
     # ---------------- 事件处理 ----------------
     def _on_sound(self, level_db):
         # 声音事件只记录不拉警笛 (仅跌倒触发告警)
-        self._fire_event("sound", f"异常声音 {level_db}dB", alarm=False)
+        self._fire_event("sound", "event.sound", alarm=False, db=level_db)
 
     def trigger_alarm(self, duration=5):
         print("[alarm] 手动测试告警")
@@ -105,7 +105,7 @@ class App:
                 event, state, fallen_det = self.fall_det.update(
                     dets, frame.shape[:2])
                 if event == "fall":
-                    self._fire_event("fall", "检测到人体跌倒!")
+                    self._fire_event("fall", "event.fall")
                 elif state == "DOWN" and not self.alarm.active:
                     # 跌倒未恢复期间持续告警
                     self.alarm.trigger()
@@ -136,12 +136,12 @@ class App:
         finally:
             pass
 
-    def _fire_event(self, etype, desc, alarm=True):
+    def _fire_event(self, etype, key, alarm=True, **params):
         ts = time.strftime("%H:%M:%S")
         with self.state.lock:
-            self._events_ui.append((ts, desc))
+            self._events_ui.append((ts, key, params))
             self.state.events = list(self._events_ui[-50:])
-        print(f"[event] {ts} {desc}")
+        print(f"[event] {ts} {tr(key, **params)}")
         self.recorder.push_event(etype)
         if alarm:
             self.alarm.trigger()

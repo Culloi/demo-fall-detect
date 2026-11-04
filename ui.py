@@ -11,6 +11,102 @@ import cv2
 from pose_detector import draw_pose
 
 
+# ------------------------------------------------------------------
+# 中英文切换 (i18n)
+# ------------------------------------------------------------------
+_STRINGS = {
+    "zh": {
+        "win.title": "跌倒检测 + 异常声音告警 Demo (RK3576)",
+        "header.title": "跌倒检测监控系统",
+        "header.subtitle": "Fall Detection · RK3576 NPU",
+        "lang.btn": "EN",
+        "badge.normal": "● 正常监控",
+        "badge.normal_muted": "● 正常监控 (静音)",
+        "badge.fall": "⚠ 检测到跌倒!",
+        "badge.fall_alarm": "跌倒(告警中)",
+        "card.fps": "帧率",
+        "card.infer": "推理耗时",
+        "card.person": "画面人数",
+        "card.noise": "环境底噪",
+        "card.sound": "声音强度",
+        "btn.test_alarm": "⚠ 测试告警",
+        "btn.mute": "静音 / 取消",
+        "btn.manual": "手动存录像",
+        "btn.quit": "退出",
+        "log.caption": "事件日志",
+        "event.sound": "异常声音 {db}dB",
+        "event.fall": "检测到人体跌倒!",
+        "event.manual": "手动触发录像",
+        "status.init": "状态: 初始化",
+        "status.normal": "状态: 正常监控",
+        "status.down": "状态: ⚠ 检测到跌倒!",
+        "status.down_alarm": "状态: 跌倒(告警中)",
+        "status.metrics": "FPS: {fps:.1f}  推理: {ms:.0f}ms  人数: {persons}",
+        "status.metrics_none": "FPS: -  推理: -ms  人数: 0",
+        "status.sound": "声音: {db:.0f}dB  底噪: {nf:.0f}dB",
+        "status.sound_none": "声音: --dB  底噪: --dB",
+        "cv.hint": "demo_fall_detect (按 q 退出, a=测试告警, m=静音, "
+                   "r=手动录像, l=中英文)",
+    },
+    "en": {
+        "win.title": "Fall Detection + Abnormal Sound Alarm Demo (RK3576)",
+        "header.title": "Fall Detection Monitor",
+        "header.subtitle": "Fall Detection · RK3576 NPU",
+        "lang.btn": "中文",
+        "badge.normal": "● Monitoring",
+        "badge.normal_muted": "● Monitoring (Muted)",
+        "badge.fall": "⚠ Fall Detected!",
+        "badge.fall_alarm": "Fall (Alarm Active)",
+        "card.fps": "FPS",
+        "card.infer": "Inference",
+        "card.person": "Persons",
+        "card.noise": "Noise Floor",
+        "card.sound": "Sound Level",
+        "btn.test_alarm": "⚠ Test Alarm",
+        "btn.mute": "Mute / Unmute",
+        "btn.manual": "Manual Record",
+        "btn.quit": "Quit",
+        "log.caption": "Event Log",
+        "event.sound": "Unusual sound {db}dB",
+        "event.fall": "Human fall detected!",
+        "event.manual": "Manual recording triggered",
+        "status.init": "Status: Initializing",
+        "status.normal": "Status: Monitoring",
+        "status.down": "Status: ⚠ Fall Detected!",
+        "status.down_alarm": "Status: Fall (Alarm Active)",
+        "status.metrics": "FPS: {fps:.1f}  Inference: {ms:.0f}ms  "
+                          "Persons: {persons}",
+        "status.metrics_none": "FPS: -  Inference: -ms  Persons: 0",
+        "status.sound": "Sound: {db:.0f}dB  Noise: {nf:.0f}dB",
+        "status.sound_none": "Sound: --dB  Noise: --dB",
+        "cv.hint": "demo_fall_detect (q=quit, a=test alarm, m=mute, "
+                   "r=manual record, l=language)",
+    },
+}
+_lang = {"code": "zh"}
+
+
+def get_lang():
+    return _lang["code"]
+
+
+def set_lang(code):
+    if code in _STRINGS:
+        _lang["code"] = code
+
+
+def tr(key, **kwargs):
+    table = _STRINGS.get(_lang["code"], _STRINGS["zh"])
+    text = table.get(key) or _STRINGS["zh"].get(key, key)
+    return text.format(**kwargs) if kwargs else text
+
+
+def format_event(ev):
+    """事件 (时间, 文案 key, 参数) -> 当前语言的可显示文本."""
+    ts, key, params = ev
+    return f"[{ts}] {tr(key, **(params or {}))}"
+
+
 class AppState:
     """线程间共享状态."""
 
@@ -25,7 +121,7 @@ class AppState:
         self.noise_db = -50.0
         self.alarm_active = False
         self.muted = False
-        self.events = []           # [(time_str, type)]
+        self.events = []           # [(time_str, 文案key, 参数)]
         self.quit = False
 
 
@@ -94,27 +190,37 @@ class QtUI(BaseUI):
         self.qt_app.setFont(QtGui.QFont("Noto Sans CJK SC", 10))
 
         self.win = QtWidgets.QWidget()
-        self.win.setWindowTitle("跌倒检测 + 异常声音告警 Demo (RK3576)")
-        self.win.resize(window_w + 280, 720)
+        self.win.setWindowTitle(tr("win.title"))
+        avail = self.win.screen().availableGeometry()
+        self.win.setMinimumSize(min(640, avail.width()),
+                                min(480, avail.height()))
+        self.win.resize(min(window_w + 280, avail.width() - 20),
+                        min(748, avail.height() - 20))
 
         root = QtWidgets.QVBoxLayout(self.win)
         root.setContentsMargins(12, 0, 12, 12)
-        root.setSpacing(10)
+        root.setSpacing(8)
 
         # ---- 顶栏: 标题 + 状态徽标 ----
         header = QtWidgets.QFrame(objectName="header")
         hl = QtWidgets.QHBoxLayout(header)
-        hl.setContentsMargins(4, 10, 4, 10)
+        hl.setContentsMargins(4, 6, 4, 6)
         tw = QtWidgets.QVBoxLayout()
         tw.setSpacing(0)
-        t = QtWidgets.QLabel("跌倒检测监控系统", objectName="title")
-        st = QtWidgets.QLabel("Fall Detection · RK3576 NPU", objectName="subtitle")
+        t = QtWidgets.QLabel(tr("header.title"), objectName="title")
+        st = QtWidgets.QLabel(tr("header.subtitle"), objectName="subtitle")
+        self._title_lb = t
+        self._subtitle_lb = st
         tw.addWidget(t)
         tw.addWidget(st)
         hl.addLayout(tw)
         hl.addStretch(1)
-        self.badge = QtWidgets.QLabel("正常监控", objectName="badge")
+        self.badge = QtWidgets.QLabel(tr("badge.normal"), objectName="badge")
         hl.addWidget(self.badge)
+        self.lang_btn = QtWidgets.QPushButton(tr("lang.btn"))
+        self.lang_btn.setFocusPolicy(QtCore.Qt.NoFocus)
+        self.lang_btn.clicked.connect(self._toggle_lang)
+        hl.addWidget(self.lang_btn)
         root.addWidget(header)
 
         # ---- 中部: 视频 + 右侧面板 ----
@@ -122,49 +228,54 @@ class QtUI(BaseUI):
         mid.setSpacing(10)
         self.video = QtWidgets.QLabel(objectName="video")
         self.video.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.video.setMinimumSize(480, 320)
+        self.video.setMinimumSize(360, 240)
         mid.addWidget(self.video, stretch=1)
 
         side = QtWidgets.QVBoxLayout()
-        side.setSpacing(10)
+        side.setSpacing(4)
         self.cards = {}
-        for key, title in (("fps", "帧率"), ("infer", "推理耗时"),
-                           ("person", "画面人数"), ("noise", "环境底噪")):
-            side.addWidget(self._make_card(key, title))
+        self.card_titles = {}
+        for key in ("fps", "infer", "person", "noise"):
+            side.addWidget(self._make_card(key))
         # 声音强度卡
         sound_card = QtWidgets.QFrame(objectName="card")
         sv = QtWidgets.QVBoxLayout(sound_card)
-        sv.setContentsMargins(14, 10, 14, 12)
-        sv.setSpacing(6)
-        sv.addWidget(QtWidgets.QLabel("声音强度", objectName="cardTitle"))
+        sv.setContentsMargins(14, 8, 14, 8)
+        sv.setSpacing(4)
+        self.sound_title = QtWidgets.QLabel(tr("card.sound"),
+                                            objectName="cardTitle")
+        sv.addWidget(self.sound_title)
         self.sound_value = QtWidgets.QLabel("-- dB", objectName="cardValue")
         sv.addWidget(self.sound_value)
         self.sound_bar = QtWidgets.QProgressBar()
+        self.sound_bar.setMinimumHeight(6)
         self.sound_bar.setRange(0, 60)
         self.sound_bar.setTextVisible(False)
         sv.addWidget(self.sound_bar)
         side.addWidget(sound_card)
         side.addStretch(1)
 
-        for text, slot, obj in (("⚠ 测试告警", self._test, "warn"),
-                                ("静音 / 取消", self._mute, None),
-                                ("手动存录像", self._manual, None),
-                                ("退出", self._on_close, None)):
-            b = QtWidgets.QPushButton(text)
+        self.buttons = {}
+        for key, slot, obj in (("btn.test_alarm", self._test, "warn"),
+                               ("btn.mute", self._mute, None),
+                               ("btn.manual", self._manual, None),
+                               ("btn.quit", self._on_close, None)):
+            b = QtWidgets.QPushButton(tr(key))
             if obj:
                 b.setObjectName(obj)
             b.clicked.connect(slot)
             side.addWidget(b)
+            self.buttons[key] = b
         mid.addLayout(side)
         root.addLayout(mid, stretch=1)
 
         # ---- 底部: 事件日志 ----
         log_frame = QtWidgets.QVBoxLayout()
-        cap = QtWidgets.QLabel("事件日志")
-        cap.setStyleSheet("color:#8b919c; font-size:12px;")
-        log_frame.addWidget(cap)
+        self.log_cap = QtWidgets.QLabel(tr("log.caption"))
+        self.log_cap.setStyleSheet("color:#8b919c; font-size:12px;")
+        log_frame.addWidget(self.log_cap)
         self.log = QtWidgets.QListWidget()
-        self.log.setMinimumHeight(110)
+        self.log.setMinimumHeight(50)
         log_frame.addWidget(self.log)
         root.addLayout(log_frame)
 
@@ -174,17 +285,37 @@ class QtUI(BaseUI):
         self.timer.timeout.connect(self._tick)
         self.timer.start(33)
 
-    def _make_card(self, key, title):
+    def _make_card(self, key):
         QtWidgets = self.QtWidgets
         card = QtWidgets.QFrame(objectName="card")
         v = QtWidgets.QVBoxLayout(card)
-        v.setContentsMargins(14, 10, 14, 12)
+        v.setContentsMargins(14, 6, 14, 6)
         v.setSpacing(2)
-        v.addWidget(QtWidgets.QLabel(title, objectName="cardTitle"))
+        title = QtWidgets.QLabel(tr("card." + key), objectName="cardTitle")
+        v.addWidget(title)
         val = QtWidgets.QLabel("-", objectName="cardValue")
         v.addWidget(val)
         self.cards[key] = val
+        self.card_titles[key] = title
         return card
+
+    # ---- 中英文切换 ----
+    def _toggle_lang(self):
+        set_lang("en" if get_lang() == "zh" else "zh")
+        self._apply_lang()
+
+    def _apply_lang(self):
+        self.win.setWindowTitle(tr("win.title"))
+        self._title_lb.setText(tr("header.title"))
+        self._subtitle_lb.setText(tr("header.subtitle"))
+        self.lang_btn.setText(tr("lang.btn"))
+        self.log_cap.setText(tr("log.caption"))
+        self.sound_title.setText(tr("card.sound"))
+        for key, lb in self.card_titles.items():
+            lb.setText(tr("card." + key))
+        for key, b in self.buttons.items():
+            b.setText(tr(key))
+        self._n_events = -1          # 强制下一帧按新语言重绘事件日志
 
     # ---- 按钮动作 ----
     def _test(self):
@@ -243,10 +374,12 @@ class QtUI(BaseUI):
 
         # 状态徽标
         if fall == "DOWN":
-            self.badge.setText("⚠ 检测到跌倒!" if alarm else "跌倒(告警中)")
+            self.badge.setText(tr("badge.fall") if alarm
+                               else tr("badge.fall_alarm"))
             self.badge.setProperty("alarm", "true")
         else:
-            self.badge.setText("● 正常监控" + (" (静音)" if muted else ""))
+            self.badge.setText(tr("badge.normal_muted") if muted
+                               else tr("badge.normal"))
             self.badge.setProperty("alarm", "false")
         self.badge.style().unpolish(self.badge)
         self.badge.style().polish(self.badge)
@@ -263,8 +396,8 @@ class QtUI(BaseUI):
         if len(events) != self._n_events:
             self._n_events = len(events)
             self.log.clear()
-            for t, e in reversed(events):
-                self.log.addItem(f"[{t}] {e}")
+            for ev in reversed(events):
+                self.log.addItem(format_event(ev))
 
 
 # ------------------------------------------------------------------
@@ -277,7 +410,7 @@ class TkUI(BaseUI):
         from tkinter import ttk
         self.tk = tk
         self.root = tk.Tk()
-        self.root.title("跌倒检测 + 异常声音告警 Demo (RK3576)")
+        self.root.title(tr("win.title"))
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         from PIL import Image, ImageTk
@@ -290,9 +423,9 @@ class TkUI(BaseUI):
         bar = ttk.Frame(self.root, padding=6)
         bar.pack(side="top", fill="x")
 
-        self.status_var = tk.StringVar(value="状态: 初始化")
-        self.fps_var = tk.StringVar(value="FPS: -  推理: -ms  人数: 0")
-        self.sound_var = tk.StringVar(value="声音: --dB  底噪: --dB")
+        self.status_var = tk.StringVar(value=tr("status.init"))
+        self.fps_var = tk.StringVar(value=tr("status.metrics_none"))
+        self.sound_var = tk.StringVar(value=tr("status.sound_none"))
         ttk.Label(bar, textvariable=self.status_var, font=("Sans", 13, "bold"),
                   foreground="#c0392b").pack(side="left", padx=8)
         ttk.Label(bar, textvariable=self.fps_var).pack(side="left", padx=8)
@@ -304,15 +437,24 @@ class TkUI(BaseUI):
 
         btns = ttk.Frame(bar)
         btns.pack(side="right")
-        ttk.Button(btns, text="测试告警", command=self._test).pack(side="left", padx=4)
-        ttk.Button(btns, text="静音/取消", command=self._mute).pack(side="left", padx=4)
-        ttk.Button(btns, text="手动存录像", command=self._manual).pack(side="left", padx=4)
-        ttk.Button(btns, text="退出", command=self._on_close).pack(side="left", padx=4)
+        self.buttons = {}
+        for key, slot in (("btn.test_alarm", self._test),
+                          ("btn.mute", self._mute),
+                          ("btn.manual", self._manual),
+                          ("btn.quit", self._on_close)):
+            b = ttk.Button(btns, text=tr(key), command=slot)
+            b.pack(side="left", padx=4)
+            self.buttons[key] = b
+        self.lang_btn = ttk.Button(bar, text=tr("lang.btn"),
+                                   command=self._toggle_lang)
+        self.lang_btn.pack(side="right", padx=4)
 
-        log_frame = ttk.LabelFrame(self.root, text="事件日志", padding=4)
-        log_frame.pack(side="bottom", fill="x")
-        self.listbox = tk.Listbox(log_frame, height=5)
+        self.log_frame = ttk.LabelFrame(self.root, text=tr("log.caption"),
+                                        padding=4)
+        self.log_frame.pack(side="bottom", fill="x")
+        self.listbox = tk.Listbox(self.log_frame, height=5)
         self.listbox.pack(fill="x")
+        self._force_log = False
 
     def _test(self):
         self.app.trigger_alarm(duration=5)
@@ -329,6 +471,19 @@ class TkUI(BaseUI):
             self.root.destroy()
         except Exception:
             pass
+
+    # ---- 中英文切换 ----
+    def _toggle_lang(self):
+        set_lang("en" if get_lang() == "zh" else "zh")
+        self._apply_lang()
+
+    def _apply_lang(self):
+        self.root.title(tr("win.title"))
+        self.lang_btn.configure(text=tr("lang.btn"))
+        self.log_frame.configure(text=tr("log.caption"))
+        for key, b in self.buttons.items():
+            b.configure(text=tr(key))
+        self._force_log = True
 
     def run(self):
         self.root.after(33, self._tick)
@@ -364,17 +519,20 @@ class TkUI(BaseUI):
             self.video_label.configure(image=self._photo)
 
         if fall == "DOWN":
-            self.status_var.set("状态: ⚠ 检测到跌倒!" if alarm else "状态: 跌倒(告警中)")
+            self.status_var.set(tr("status.down") if alarm
+                                else tr("status.down_alarm"))
         else:
-            self.status_var.set("状态: 正常监控")
-        self.fps_var.set(f"FPS: {fps:.1f}  推理: {ms:.0f}ms  人数: {persons}")
-        self.sound_var.set(f"声音: {db:.0f}dB  底噪: {nf:.0f}dB")
+            self.status_var.set(tr("status.normal"))
+        self.fps_var.set(tr("status.metrics", fps=fps, ms=ms,
+                            persons=persons))
+        self.sound_var.set(tr("status.sound", db=db, nf=nf))
         self.pb["value"] = max(0, db + 60)
 
-        if self.listbox.size() != len(events):
+        if self._force_log or self.listbox.size() != len(events):
+            self._force_log = False
             self.listbox.delete(0, "end")
-            for t, e in reversed(events):
-                self.listbox.insert("end", f"[{t}] {e}")
+            for ev in reversed(events):
+                self.listbox.insert("end", format_event(ev))
 
         self.root.after(33, self._tick)
 
@@ -386,7 +544,7 @@ class CvUI(BaseUI):
     def __init__(self, state, app, window_w=1024):
         super().__init__(state, app)
         self.window_w = window_w
-        self.win = "demo_fall_detect (按 q 退出, a=测试告警, m=静音, r=手动录像)"
+        self.win = tr("cv.hint")
         cv2.namedWindow(self.win, cv2.WINDOW_NORMAL)
 
     def run(self):
@@ -413,6 +571,9 @@ class CvUI(BaseUI):
                 self.app.toggle_mute()
             elif key == ord("r"):
                 self.app.manual_record()
+            elif key == ord("l"):
+                set_lang("en" if get_lang() == "zh" else "zh")
+                cv2.setWindowTitle(self.win, tr("cv.hint"))
         cv2.destroyAllWindows()
 
     def close(self):
